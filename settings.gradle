@@ -1,1 +1,14 @@
-include ':app', ':common', ':nfcd', ':protobuf'
+try {
+    def processEnvironment = Class.forName("java.lang.ProcessEnvironment")
+    def theEnvironmentField = processEnvironment.getDeclaredField("theEnvironment")
+    theEnvironmentField.setAccessible(true)
+    def map = (Map) theEnvironmentField.get(null)
+    map.remove("ANDROID_PREFS_ROOT")
+    
+    def theCaseInsensitiveEnvironmentField = processEnvironment.getDeclaredField("theCaseInsensitiveEnvironment")
+    theCaseInsensitiveEnvironmentField.setAccessible(true)
+    def ciMap = (Map) theCaseInsensitiveEnvironmentField.get(null)
+    ciMap.remove("ANDROID_PREFS_ROOT")
+} catch (Throwable ignored) {}
+
+include ':app', ':common', ':nfcd', ':protobuf', ':xposed-api'

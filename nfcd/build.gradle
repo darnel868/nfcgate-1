@@ -57,5 +57,5 @@ dependencies {
     //compile fileTree(include: ['*.jar'], dir: 'libs')
     implementation project(':common')
 
-    compileOnly 'de.robv.android.xposed:api:82'
+    compileOnly project(':xposed-api')
 }

@@ -9,7 +9,6 @@ import android.content.pm.PackageManager;
 import android.net.LocalSocket;
 import android.net.LocalSocketAddress;
 import android.os.Build;
-import android.os.Bundle;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
@@ -26,7 +25,7 @@ public class InjectionBroadcastWrapper extends BroadcastReceiver {
     private boolean mCaptureEnabled = false;
     private final ArrayList<byte[]> mCaptured = new ArrayList<>();
 
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
+        @SuppressLint("UnspecifiedRegisterReceiverFlag")
     public InjectionBroadcastWrapper(Context ctx) {
         mCtx = ctx;
 
@@ -137,13 +136,19 @@ public class InjectionBroadcastWrapper extends BroadcastReceiver {
         }
     }
 
+    @SuppressLint("UnsafeDynamicallyLoadedCode")
     private void loadForeignLibrary(Context ctx, String foreignPkg, String name) {
         PackageManager pm = ctx.getPackageManager();
 
         // find foreign package library path and assemble libPath
         String libPath;
         try {
-            String dir = pm.getPackageInfo(foreignPkg, 0).applicationInfo.nativeLibraryDir;
+            android.content.pm.PackageInfo info = pm.getPackageInfo(foreignPkg, 0);
+            if (info.applicationInfo == null) {
+                Log.e("HOOKNFC", "Failed to find application info for " + foreignPkg);
+                return;
+            }
+            String dir = info.applicationInfo.nativeLibraryDir;
             libPath = combinePath(dir, "lib" + name + ".so");
         } catch (PackageManager.NameNotFoundException e) {
             Log.e("HOOKNFC", "Failed to find package " + foreignPkg);

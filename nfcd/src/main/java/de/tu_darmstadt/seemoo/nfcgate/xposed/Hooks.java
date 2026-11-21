@@ -30,6 +30,7 @@ import de.tu_darmstadt.seemoo.nfcgate.util.Utils;
 
 import static de.robv.android.xposed.XposedHelpers.findAndHookMethod;
 
+@SuppressWarnings({"unchecked", "ConstantConditions", "RedundantThrows", "ResultOfMethodCallIgnored"})
 public class Hooks implements IXposedHookLoadPackage {
     private interface NfcServiceConstructorHook {
         void afterHookedMethod(XC_MethodHook.MethodHookParam param);
