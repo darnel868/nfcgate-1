@@ -38,8 +38,10 @@ android {
 
         // add Git information to BuildConfig if .git directory present
         if (new File(rootProject.projectDir, ".git").exists()) {
-            apply plugin: 'com.palantir.git-version'
-            buildConfigField 'String', 'GIT_COMMIT_HASH', "\"${versionDetails().gitHash}\""
+            def gitHash = providers.exec {
+                commandLine 'git', 'rev-parse', '--short', 'HEAD'
+            }.standardOutput.asText.get().trim()
+            buildConfigField 'String', 'GIT_COMMIT_HASH', "\"${gitHash}\""
         } else
             buildConfigField 'String', 'GIT_COMMIT_HASH', '""'
 
